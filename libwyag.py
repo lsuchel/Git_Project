@@ -384,3 +384,9 @@ def log_graphviz(repo, sha, seen):
         print("  c_{0} -> c{1};".format(sha, p))
         log_graphviz(repo, p, seen)
 
+class GitTreeLeaf (object):
+    def __init__(self, mode, path, sha):
+        self.mode = mode
+        self.path = path
+        self.sha = sha
+
