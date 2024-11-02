@@ -390,3 +390,17 @@ class GitTreeLeaf (object):
         self.path = path
         self.sha = sha
 
+def tree_parse_one(ra, start=0):
+    x= raw.find(b' ',start)
+    assert x-start == 5 or x-start==6
+
+    mode = raw[start:x]
+    if len(mode) == 5:
+        mode =b" " + mode
+
+    y = raw.find(b'\x00'. x)
+    path = raw[x+1:y]
+
+    sha = format(int.from_bytes(raw[y+1:y+21], "big"), "040x")
+    return y+21, GitTreeLeaf(mode, path.decode("utf8"), sha)
+
