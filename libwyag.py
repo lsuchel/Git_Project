@@ -443,3 +443,42 @@ class GitTree(GitObject):
 
     def init(self):
         self.items = list()
+
+argsp = argsubparsers.add_parser("ls-tree", help="Pretty-print a tree object.")
+argsp.add_argument("-r",
+                   dest="recursive",
+                   action="store_true",
+                   help="Recurse into sub-trees")
+
+argsp.add_argument("tree",
+                   help="A tree-ish object.")
+
+def cmd_ls_tree(args):
+    repo = repo_fin()
+    ls_tree(repo, args.tree, args.recursive)
+
+def ls_tree(repo, ref, recursive=None, prefix=""):
+    sha = object_find(repo, ref, fmt=b"tree")
+    obj = object_read(repo, sha)
+    for item in obj.items:
+        if len(item.mode) == 5:
+            type = item.mode[0:1]
+        else:
+            type = item.mode[0:2]
+
+        match type:
+            case b'04': type = "tree"
+            case b'10': type = "blob"
+            case b'12': type = "blob"
+            case b'16': type = "commit"
+            case _: raise Exception("Weird tree leaf mode {}".format(item.mode))
+
+        if not (recursive and type =='tree'):
+            print("{0} {1} {2}\t{3}".format(
+                "0" * (6- len(item.mode)) +item.mode.decode("ascii"),
+                type,
+                item.sha,
+                os.path.join(prefix, item.path)))
+        else:
+            ls_tree(repo, item.sha, recursive, os.path.join(prefix, item.path))
+
