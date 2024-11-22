@@ -520,3 +520,99 @@ def tree_checkout(repo, tree, path):
             with open(dest, 'wb') as f:
                 f.write(obj.blobdata)
 
+def ref_resolve(repo, ref):
+    path = repo_file(repo, ref)
+
+    if not os.path.isfile(path):
+        return None
+
+    with open(path, 'r')as fp:
+        data = fp.read()[:-1]
+
+    if data.startswith("ref: "):
+        return ref_resolve(repo, data[5:])
+    else:
+        return data
+
+def ref_list(repo, path=None):
+    if not path:
+        path = repo_dir(repo. "refs")
+    ret = collections.OrderdDict()
+    for f in sorted(os.listdir(path)):
+        can = os.path.join(path, f)
+        if os.path.isdir(can):
+            ret[f] = ref_list(repo, can)
+        else:
+            ret[f] = ref_resolve(repo, can)
+
+    return ret
+
+argsp = argsubparsers.add_parser("show-ref". help="List references.")
+
+def cmd_show_ref(args):
+    repo = repo_find()
+    refs = ref_list(repo)
+    show_ref(repo, refs, prefix="refs")
+
+def show_ref(repo, refs, with_hash=True, prefix=""):
+    for k, v in refs.items():
+        if type(v) == str:
+            print ("{0}{1}{2}".format(
+                v + " " if with_hash else "",
+                prefix + "/" if prefix else "",
+            k))
+        else:
+            show_ref(repo, v, with_hash=with_hash, prefix="{0}{1}{2}".format(prefix, "/" if prefix else "", k))
+
+class GitTag(GitCommit):
+    fmt = b'tag'
+
+argsp = argsubparsers.add_parser(
+    "tag",
+    help="List and create tags")
+
+argsp.add_argument("-a",
+                   action="store_true",
+                   dest="create_tag_object",
+                   help="possible to create a tag object")
+
+argsp.add_argument("name",
+                   nargs="?",
+                   help="The new tag's name")
+
+argsp.add_argument("object",
+                   default="HEAD",
+                   nargs="?",
+                   help="object - the new tag will point to")
+
+def cmd_tag(args):
+    repo = repo_find()
+
+    if args.name:
+        tag_create(repo,
+                   args.name,
+                   args.object,
+                   type="object" if args.create_tag_object else "ref")
+    else:
+        refs = ref_list(repo)
+        show_ref(repo, refs["tags"], with_hash=False)
+
+def tag_create(repo, name, ref, create_tag_object=False):
+    sha = object_find(repo, ref)
+
+    if create_tag_object:
+        tag = GitTag(repo)
+        tag.kvlm = collections.OrderedDict()
+        tag.kvlm[b'object'] = sha.encode()
+        tag.kvlm[b'type'] = b'commit'
+        tag.kvlm[b'tag'] = name.encode()
+        tag.kvlm[b'tagger'] = b'Wyag <example@example.com>'
+        tag.kvlm[None] = b"A tag created by Wyag, which won't let you customize the message!"
+        tag_sha = object_write(tag)
+        ref_create(repo, "tags/" + name, tag_sha)
+    else:
+        ref_create(repo, "tags/" + name, sha)
+
+def ref_create(repo, ref_name, sha):
+    with open(repo_file(repo, "refs/" + ref_name), 'w') as fp:
+        fp.write(sha + "\n")
