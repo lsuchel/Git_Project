@@ -202,9 +202,9 @@ def object_read(repo, sha):
         case b'tag'    : c=GitTag
         case b'blob'   : c=GitBlob
         case _:
-            raise Exception("nknown type {0} for object {1}".format(fmt.decode("ascii"), sha"))
+            raise Exception("nknown type {0} for object {1}".format(fmt.decode("ascii"), sha))
         
-        return c(raw[y+1:])
+    return c(raw[y+1:])
 
 def object_wirte(obj, repo=None):
     data = obj.serialize()
@@ -215,7 +215,7 @@ def object_wirte(obj, repo=None):
         path=repo_file(repo, "objects", sha[0:2], sha[2:], mkdir=True)
         if not os.path.exists(path):
             with open(path, 'wb') as f:
-            f.write(zlib.compress(result))
+                f.write(zlib.compress(result))
     return sha
 
 class GitBlob(GitObject):
@@ -241,7 +241,7 @@ def cat_file(repo, obj, fmt=None):
     obj = object_read(repo, object_find(repo, obj, fmt=fmt))
     sys.stdout.buffer.write(obj.serialize())
 
-def object_find(repo, name, fmt-None, follow=True):
+def object_find(repo, name, fmt=None, follow=True):
     return name
 
 argsp = argsubparsers.add_parser(
@@ -369,7 +369,7 @@ def log_graphviz(repo, sha, seen):
         message = message[:message.index("\n")]
 
     print ("  c_{0} [label=\"{1}: {2}\"]".format(sha, sha[0:7], message))
-    assert commit.fmt==b 'commit'
+    assert commit.fmt==b'commit'
 
     if not b'parent' in commit.kvlm.keys():
         return
@@ -536,7 +536,7 @@ def ref_resolve(repo, ref):
 
 def ref_list(repo, path=None):
     if not path:
-        path = repo_dir(repo. "refs")
+        path = repo_dir(repo, "refs")
     ret = collections.OrderdDict()
     for f in sorted(os.listdir(path)):
         can = os.path.join(path, f)
@@ -547,7 +547,7 @@ def ref_list(repo, path=None):
 
     return ret
 
-argsp = argsubparsers.add_parser("show-ref". help="List references.")
+argsp = argsubparsers.add_parser("show-ref", help="List references.")
 
 def cmd_show_ref(args):
     repo = repo_find()
@@ -616,3 +616,43 @@ def tag_create(repo, name, ref, create_tag_object=False):
 def ref_create(repo, ref_name, sha):
     with open(repo_file(repo, "refs/" + ref_name), 'w') as fp:
         fp.write(sha + "\n")
+
+ def object_resolve(repo, name):
+    """Resolve name to an object hash in repo.
+
+This function is aware of:
+
+ - the HEAD literal
+    - short and long hashes 
+    - tags
+    - branches
+    - remote branches """
+    candidates = list()
+    hashRE = re.compile(r"^[0-9A-Fa-f]{4,40}$")
+
+    if not name.strip():
+        return None
+    
+    if name =="HEAD":
+        return [ ref_resolve(repo, "HEAD") ]
+    
+    if hashRE.match(name):
+        name = name.lower()
+        prefix = name[0:2]
+        path = repo_dir(repo, "objects", prefix, mkdir=False)
+        if path:
+            rem = name[2:]
+            for f in os.listdir(path):
+                if f.startswith(rem):
+                    candidates.append(prefix + f)
+
+    as_tag = ref_resolve(repo, "refs/tags/" + name)
+    if as_tag:
+        candidates.append(as_tag)
+
+    as_branch = ref_resolve(repo, "refs/heads/" + name)
+    if as_branch:
+        candidates.append(as_branch)
+
+    return candidates
+
