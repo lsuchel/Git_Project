@@ -50,7 +50,7 @@ class GitRepository (object):
             raise Exception("Not Git Rep %s" % path)
         
         # Read config file in .git/config
-        self.conf = configparser.ConfigParserO()
+        self.conf = configparser.ConfigParser()
         cf = repo_file(self, "config")
 
         if cf and os.path.exists(cf):
@@ -90,7 +90,7 @@ def repo_dir(repo, *path, mkdir=False):
     else:
         return None
     
-def rep_create(path):
+def repo_create(path):
     """Create a new repository at path."""
 
     repo = GitRepository(path, True)
