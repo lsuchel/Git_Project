@@ -343,7 +343,10 @@ class GitCommit(GitObject):
         self.kvlm = dict()
 
 argsp = argsubparsers.add_parser("log", help = "Display history of commit that was given.")
-argsp.add_argument ("commit", defualt = "HEAD", nargs = "?", help = "Commit to start at.")
+argsp.add_argument("commit",
+                   default="HEAD",
+                   nargs="?",
+                   help="Commit to start at.")
 
 def cmd_log(args):
     repo = repo_find()
@@ -617,7 +620,7 @@ def ref_create(repo, ref_name, sha):
     with open(repo_file(repo, "refs/" + ref_name), 'w') as fp:
         fp.write(sha + "\n")
 
- def object_resolve(repo, name):
+def object_resolve(repo, name):
     """Resolve name to an object hash in repo.
 
 This function is aware of:
@@ -683,3 +686,27 @@ def object_find(repo, name, fmt=None, follow=True):
         else:
             return None
         
+argsp = argsubparsers.add_parser(
+    "rev-parse",
+    help="Parse revision (or other objects) identifiers")
+
+argsp.add_argument("--wyag-type",
+                   metavar="type",
+                   dest="type",
+                   choices=["blob", "commit", "tag", "tree"],
+                   default=None,
+                   help="Specify the expected type")
+
+argsp.add_argument("name",
+                   help="The name to parse")
+
+def cmd_rev_parse(args):
+    if args.type:
+        fmt = args.type.encode()
+    else:
+        fmt = None
+
+    repo = repo_find()
+
+    print (object_find(repo, args.name, fmt, follow=True))
+
