@@ -737,3 +737,112 @@ class GitIndex (object):
         self.version = version
         self.entries = entries
 
+def index_read(repo):
+    index_file = repo_file(repo, "index")
+
+    if not os.path.exists(index_file):
+        return GitIndex()
+    
+    with open(index_file, 'rb') as f:
+        raw = f.read()
+
+    header = raw[:12]
+    signature = header[:4]
+    assert signature == b"DIRC"
+    version = int.from_bytes(header[4:8], "big")
+    assert version == 2, "wyag only supports index file version 2"
+    count = int.from_bytes(header[8:12], "big")
+
+    entries = list()
+
+    content = raw[12:]
+    idx = 0
+    for i in rang(0, count):
+        ctime_s = int.from_bytes(content[idx: idx+4], "big")
+        ctime_ns = int.from_bytes(content[idx+4: idx+8], "big")
+        mtime_s = int.from_bytes(content[idx+8: idx+12], "big")
+        mtime_ns = int.from_bytes(content[idx+12: idx+16], "big")
+        dev = int.from_bytes(content[idx+16: idx+20], "big")
+        ino = int.from_bytes(content[idx+20: idx+24], "big")
+        unused = int.from_bytes(content[idx+24: idx+26], "big")
+        assert 0 == unused
+        mode = int.from_bytes(content[idx+26: idx+28], "big")
+        mode_type = mode >> 12
+        assert mode_type in [0b1000, 0b1010, 0b1110]
+        mode_perms = mode & 0b0000000111111111
+        uid = int.from_bytes(content[idx+28: idx+32], "big")
+        gid = int.from_bytes(content[idx+32: idx+36], "big")
+        fsize = int.from_bytes(content[idx+36: idx+40], "big")
+        sha = format(int.from_bytes(content[idx+40: idx+60], "big"), "040x")
+        flags = int.from_bytes(content[idx+60: idx+62], "big")
+        flag_assume_valid = (flags & 0b1000000000000000) != 0
+        flag_extended = (flags & 0b0100000000000000) != 0
+        assert not flag_extended
+        flag_stage =  flags & 0b0011000000000000
+        name_length = flags & 0b0000111111111111
+
+        idx += 62
+
+        if name_length < 0xFFF:
+            assert content[idx + name_length] == 0x000
+            raw_name = content[idx:idx+name_length]
+            idx += name_length + 1
+        else:
+            print("Notice: Name is 0x{:X} bytes long.".format(name_length))
+            null_idx = content.find(b'\x00', idx + 0xFFF)
+            raw_name = content[idx: null_idx]
+            idx = null_idx + 1
+
+        name = raw_name.decode("utf8")
+
+        idx = 8 * ceil(idx / 8)
+
+        entries.append(GitIndexEntry(ctime=(ctime_s, ctime_ns),
+                                     mtime=(mtime_s,  mtime_ns),
+                                     dev=dev,
+                                     ino=ino,
+                                     mode_type=mode_type,
+                                     mode_perms=mode_perms,
+                                     uid=uid,
+                                     gid=gid,
+                                     fsize=fsize,
+                                     sha=sha,
+                                     flag_assume_valid=flag_assume_valid,
+                                     flag_stage=flag_stage,
+                                     name=name))
+        
+    return GitIndex(version=version, entries=entries)
+
+argsp = argsubparsers.add_parser("ls-files", help = "List all the stage files")
+argsp.add_argument("--verbose", action="store_true", help="Show everything.")
+
+def cmd_ls_files(args):
+  repo = repo_find()
+  index = index_read(repo)
+  if args.verbose:
+    print("Index file format v{}, containing {} entries.".format(index.version, len(index.entries)))
+
+  for e in index.entries:
+    print(e.name)
+    if args.verbose:
+      print("  {} with perms: {:o}".format(
+        { 0b1000: "regular file",
+          0b1010: "symlink",
+          0b1110: "git link" }[e.mode_type],
+        e.mode_perms))
+      print("  on blob: {}".format(e.sha))
+      print("  created: {}.{}, modified: {}.{}".format(
+        datetime.fromtimestamp(e.ctime[0])
+        , e.ctime[1]
+        , datetime.fromtimestamp(e.mtime[0])
+        , e.mtime[1]))
+      print("  device: {}, inode: {}".format(e.dev, e.ino))
+      print("  user: {} ({})  group: {} ({})".format(
+        pwd.getpwuid(e.uid).pw_name,
+        e.uid,
+        grp.getgrgid(e.gid).gr_name,
+        e.gid))
+      print("  flags: stage={} assume_valid={}".format(
+        e.flag_stage,
+        e.flag_assume_valid))
+
