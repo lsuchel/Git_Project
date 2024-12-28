@@ -995,6 +995,21 @@ def tree_to_dict(repo, ref, prefix=""):
 
     return ret
 
+def cmd_status_head_index(repo, index):
+    print("Changes to be committed:")
+
+    head = tree_to_dict(repo, "HEAD")
+    for entry in index.entries:
+        if entry.name in head:
+            if head[entry.name] != entry.sha:
+                print("  modified:", entry.name)
+            del head[entry.name]
+        else:
+            print("  added:  ", entry.name)
+
+    for entry in head.keys():
+        print("  deleted: ", entry)
+
 def cmd_status_index_worktree(repo, index):
     print("Changes not staged for commit:")
 
