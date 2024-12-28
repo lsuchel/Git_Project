@@ -846,3 +846,197 @@ def cmd_ls_files(args):
         e.flag_stage,
         e.flag_assume_valid))
 
+argsp = argsubparsers.add_parser("check-ignore", help = "Check path(s) against ignore rules.")
+argsp.add_argument("path", nargs="+", help="Paths to check")
+
+def cmd_check_ignore(args):
+    repo = repo_find()
+    rules = gitignore_read(repo)
+    for path in args.path:
+        if check_ignore(rules, path):
+            print(path)
+
+def gitignore_parsel(raw):
+    raw = raw.strip()
+
+    if not raw or raw[0] == "#":
+        return None
+    elif raw[0] == "!":
+        return (raw[1:], False)
+    elif raw[0] == "\\":
+        return (raw[1:], True)
+    else:
+        return (raw, True)
+    
+def gitignore_parse(lines):
+    ret = list()
+
+    for line in lines:
+        parsed = gitignore_parsel(lines)
+        if parsed:
+            ret.append(parsed)
+
+    return ret
+
+class GitIgnore(object):
+    absolute = None
+    scoped = None
+
+    def __init__(self, absolute, scoped):
+        self.absolute = absolute
+        self.scoped = scoped
+
+def gitignore_read(repo):
+    ret = GitIgnore(absolute=list(), scoped=dict())
+
+    repo_file = os.path.join(repo.gitdir, "info/exclude")
+    if os.path.exists(repo_file):
+        with open(repo_file, "r") as f:
+            ret.absolute.append(gitignore_parse(f.readlines()))
+
+    if "XDG_CONFIG_HOME" in os.environ:
+        config_home = os.environ["XDG_COFIG_HOME"]
+    else:
+        config_home = os.path.expanduser("~/.config")
+    global_file = os.path.join(config_home, "git/ignore")
+
+    if os.path.exists(global_file):
+        with open(global_file, "r") as f:
+            ret.absolute.append(gitignore_parse(f.readlines()))
+
+    index = index_read(repo)
+
+    for entry in  index.entries:
+        if entry.name == ".gitignore" or entry.name.endswith("/.gitignore"):
+            dir_name = os.path.dirname(entry.name)
+            contents = object_read(repo, entry.sha)
+            lines = contents.blobdata.decode("utf8").splitlines()
+            ret.scoped[dir_name] = gitignore_parse(lines)
+    return ret
+
+def check_ignorel(rules, path):
+    result = None
+    for (pattern, value) in rules:
+        if fnmatch(path, pattern):
+            result = value
+    return result
+
+def check_ignore_scoped(rules, path):
+    parent = os.path.dirname(path)
+    while True:
+        if parent in rules:
+            result = check_ignorel(rules[parent], path)
+            if result != None:
+                return result
+        if parent == "":
+            break
+        parent = os.path.dirname(parent)
+    return None
+
+def check_ignore_absolute(rules, path):
+    parent = os.path.dirname(path)
+    for ruleset in rules:
+        result = check_ignorel(ruleset, path)
+        if result != None:
+            return result
+    return False
+
+def check_ignore(rules, path):
+    if os.isabs(path):
+        raise Exception("This requires path to be root in repository")
+    
+    result = check_ignore_scoped(rules.scoped, path)
+    if result != None:
+        return result
+    
+    return check_ignore_absolute(rules.absolute, path)
+
+argsp = argsubparsers.add_parser("status", help = "Show the working tree status.")
+
+def cmd_status(_):
+    repo = repo_find()
+    index = index_read(repo)
+
+    cmd_status_branch(repo)
+    cmd_status_head_index(repo, index)
+    print()
+    cmd_status_index_worktree(repo, index)
+
+def branch_get_active(repo):
+    with open(repo_file(repo, "HEAD"), "r") as f:
+        head = f.read()
+
+    if head.startswith("ref: refs/heads/"):
+        return(head[16:-1])
+    else:
+        return False
+    
+def cmd_status_branch(repo):
+    branch = branch_get_active(repo)
+    if branch:
+        print("On branch {}.".format(branch))
+    else:
+        print("HEAD detached at {}.".format (object_find(repo, "HEAD")))
+
+def tree_to_dict(repo, ref, prefix=""):
+    ret = dict()
+    tree_sha = object_find(repo, ref, fmt=b"tree")
+    tree = object_read(repo, tree_sha)
+
+    for leaf in tree.items:
+        full_path = os.path.join(prefix, leaf.path)
+
+        is_subtree = leaf.mode.startswith(b'04')
+
+        if is_subtree:
+            ret.update(tree_to_dict(repo, leaf.sha, full_path))
+        else:
+            ret[full_path] = leaf.sha
+
+    return ret
+
+def cmd_status_index_worktree(repo, index):
+    print("Changes not staged for commit:")
+
+    ignore = gitignore_read(repo)
+
+    gitdir_prefix = repo.gitdir + os.path.sep
+
+    all_files = list()
+
+    for (root, _, files) in os.walk(repo.worktree, True):
+        if root==repo.gitdir or root.startswith(gitdir_prefix):
+            continue
+        for f in files:
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, repo.worktree)
+            all_files.append(rel_path)
+
+    for entry in index.entries:
+        full_path = os.path.join(repo.worktree, entry.name)
+
+        if not os.path.exists(full_path):
+            print("  deleted: ", entry.name)
+        else:
+            stat = os.stat(full_path)
+
+            ctime_ns = entry.ctime[0] * 10**9 + entry.ctime[1]
+            mtime_ns = entry.mtime[0] * 10**9 + entry.mtime[1]
+            if (stat.st_ctime_ns != ctime_ns) or (stat.st_mtime_ns != mtime_ns):
+                with open(full_path, "rb") as fd:
+                    new_sha = object_hash(fd, b"blob", None)
+                    same = entry.sha == new_sha
+
+                    if not same:
+                        print("  modified:", entry.name)
+
+        if entry.name in all_files:
+            all_files.remove(entry.name)
+
+    print()
+    print("Untracked files:")
+
+    for f in all_files:
+        if not check_ignore(ignore, f):
+            print(" ", f)
+
